@@ -1,6 +1,6 @@
 import { StreamVideoClient, User } from '@stream-io/video-react-sdk';
 
-const apiKey = import.meta.env.VITE_STREAM_API_KEY || process.env.STREAM_API_KEY || "demo_key";
+const apiKey = import.meta.env.VITE_STREAM_API_KEY || "demo_key";
 
 export const createStreamClient = (userId: string, userName: string, token?: string) => {
   const user: User = {
