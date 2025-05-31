@@ -1,22 +1,27 @@
 import { StreamVideoClient, User } from '@stream-io/video-react-sdk';
+import { apiRequest } from './queryClient';
 
-const apiKey = import.meta.env.VITE_STREAM_API_KEY || "demo_key";
+const apiKey = '8zbgd4dtkh4j';
 
-export const createStreamClient = (userId: string, userName: string, token?: string) => {
+export const createStreamClient = async (userId: string, userName: string) => {
   const user: User = {
     id: userId,
     name: userName,
   };
 
-  // For demo purposes, we'll use a development token
-  // In production, this should be generated server-side
-  const userToken = token || "demo_token";
+  try {
+    const response = await apiRequest('POST', '/api/stream/token', { userId, userName });
+    const { token } = await response.json();
   
   return new StreamVideoClient({
     apiKey,
     user,
-    token: userToken,
+      token,
   });
+  } catch (error) {
+    console.error('Failed to create Stream client:', error);
+    throw error;
+  }
 };
 
 export const generateCallId = () => {

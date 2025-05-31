@@ -14,16 +14,32 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useStream } from "@/hooks/use-stream";
+import { StreamVideo, StreamCall } from '@stream-io/video-react-sdk';
+
+interface Team {
+  id: number;
+  name: string;
+  members: string[];
+}
+
+interface Evaluation {
+  id: number;
+  teamName: string;
+  evaluatorUsn: string;
+  clarity: boolean;
+  organization: boolean;
+  engagement: boolean;
+  feedback: string;
+}
 
 interface AdminDashboardProps {
   user: any;
   onLogout: () => void;
 }
 
-export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
+function AdminDashboardContent({ user, onLogout }: AdminDashboardProps) {
   const [selectedTeam, setSelectedTeam] = useState("");
   const [currentTeam, setCurrentTeam] = useState<any>(null);
-  const [peersCount] = useState(0); // This would be updated via WebSocket in a real app
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -32,11 +48,12 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
     startScreenShare, 
     stopScreenShare, 
     isScreenSharing,
-    call 
+    call,
+    client
   } = useStream(`admin-${user.id}`, user.username);
 
   // Fetch teams
-  const { data: teams = [] } = useQuery({
+  const { data: teams = [] } = useQuery<Team[]>({
     queryKey: ['/api/teams'],
   });
 
@@ -46,7 +63,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   });
 
   // Fetch evaluations
-  const { data: evaluations = [] } = useQuery({
+  const { data: evaluations = [] } = useQuery<Evaluation[]>({
     queryKey: ['/api/evaluations'],
   });
 
@@ -144,7 +161,10 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
       await updateSessionMutation.mutateAsync({ currentTeam: team.name });
       
       // Create call for screen sharing
-      await createCall();
+      if (!call) {
+        console.log('Creating new call...');
+        await createCall();
+      }
       
       toast({
         title: "Team on stage",
@@ -154,9 +174,17 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   };
 
   const handleStartScreenShare = async () => {
+    if (!call) {
+      console.log('Creating new call before screen sharing...');
+      await createCall();
+    }
+    
     const success = await startScreenShare();
     if (success) {
-      await updateSessionMutation.mutateAsync({ screenShareActive: true });
+      await updateSessionMutation.mutateAsync({ 
+        screenShareActive: true,
+        streamCallId: call?.id
+      });
       toast({
         title: "Screen sharing started",
         description: "All peers can now see your screen",
@@ -173,7 +201,10 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   const handleStopScreenShare = async () => {
     const success = await stopScreenShare();
     if (success) {
-      await updateSessionMutation.mutateAsync({ screenShareActive: false });
+      await updateSessionMutation.mutateAsync({ 
+        screenShareActive: false,
+        streamCallId: null
+      });
       toast({
         title: "Screen sharing stopped",
         description: "You can now start the evaluation",
@@ -203,7 +234,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               <div className="flex items-center space-x-2">
                 <div className="w-2 h-2 bg-success rounded-full"></div>
                 <span className="text-sm text-gray-600">Online</span>
-                <span className="text-sm font-medium text-gray-800">{peersCount} peers connected</span>
+                <span className="text-sm font-medium text-gray-800">{teams.length} peers connected</span>
               </div>
               <Button variant="ghost" size="sm" onClick={onLogout}>
                 <LogOut className="h-4 w-4" />
@@ -468,5 +499,27 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
         </Tabs>
       </div>
     </div>
+  );
+}
+
+export default function AdminDashboard(props: AdminDashboardProps) {
+  const { client } = useStream(`admin-${props.user.id}`, props.user.username);
+
+  if (!client) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Shield className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+          <p className="text-lg font-medium text-gray-900">Initializing...</p>
+          <p className="text-sm text-gray-500">Please wait while we set up your dashboard</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <StreamVideo client={client}>
+      <AdminDashboardContent {...props} />
+    </StreamVideo>
   );
 }

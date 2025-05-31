@@ -3,6 +3,12 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertPeerSchema, insertTeamSchema, insertEvaluationSchema } from "@shared/schema";
 import { z } from "zod";
+import { StreamChat } from 'stream-chat';
+
+const streamClient = StreamChat.getInstance(
+  process.env.VITE_STREAM_API_KEY || '8zbgd4dtkh4j',
+  process.env.VITE_STREAM_API_SECRET || 'befezcjqpvna2qb6kjwg3uw94h4tt2r7aqudt4d64f2xyyrasee2x6mcctdsbun5'
+);
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Admin authentication
@@ -164,6 +170,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch evaluations" });
+    }
+  });
+
+  // Generate Stream token
+  app.post("/api/stream/token", async (req, res) => {
+    try {
+      const { userId, userName } = req.body;
+      if (!userId || !userName) {
+        return res.status(400).json({ message: "userId and userName are required" });
+      }
+
+      const token = streamClient.createToken(userId);
+      res.json({ token });
+    } catch (error) {
+      console.error('Failed to generate token:', error);
+      res.status(500).json({ message: "Failed to generate token" });
     }
   });
 

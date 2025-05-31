@@ -1,102 +1,139 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { StreamVideoClient, Call } from '@stream-io/video-react-sdk';
-import { createStreamClient, generateCallId } from '@/lib/stream';
+import { apiRequest } from '@/lib/queryClient';
 
-export const useStream = (userId: string, userName: string) => {
+// Keep track of existing clients
+const clients = new Map<string, StreamVideoClient>();
+
+export function useStream(userId: string, username: string) {
   const [client, setClient] = useState<StreamVideoClient | null>(null);
   const [call, setCall] = useState<Call | null>(null);
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    const streamClient = createStreamClient(userId, userName);
-    setClient(streamClient);
-    setIsConnected(true);
+    const initClient = async () => {
+      if (!userId || !username) {
+        console.error('userId and username are required');
+        return;
+      }
 
-    return () => {
-      streamClient.disconnectUser();
-      setIsConnected(false);
+      try {
+        // Check if client already exists
+        const existingClient = clients.get(userId);
+        if (existingClient) {
+          setClient(existingClient);
+          return;
+        }
+
+        // Get Stream token
+        const response = await apiRequest('POST', '/api/stream/token', {
+          userId: userId,
+          userName: username
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(`${response.status}: ${JSON.stringify(error)}`);
+        }
+
+        const { token } = await response.json();
+
+        // Initialize Stream client
+        const streamClient = StreamVideoClient.getOrCreateInstance({
+          apiKey: import.meta.env.VITE_STREAM_API_KEY,
+          token,
+          user: {
+            id: userId,
+            name: username,
+          }
+        });
+
+        // Store client
+        clients.set(userId, streamClient);
+        setClient(streamClient);
+
+        return () => {
+          // Only disconnect if this is the last instance
+          if (clients.get(userId) === streamClient) {
+            streamClient.disconnectUser();
+            clients.delete(userId);
+          }
+        };
+      } catch (error) {
+        console.error('Failed to initialize Stream client:', error);
+      }
     };
-  }, [userId, userName]);
 
-  const createCall = useCallback(async () => {
+    initClient();
+  }, [userId, username]);
+
+  const createCall = async () => {
     if (!client) return null;
 
-    const callId = generateCallId();
-    const newCall = client.call('default', callId);
-    
     try {
-      await newCall.getOrCreate();
+      const newCall = client.call('default', `${userId}-${Date.now()}`);
+      await newCall.getOrCreate({
+        data: {
+          members: [{ user_id: userId, role: 'user' }],
+        },
+      });
       setCall(newCall);
       return newCall;
     } catch (error) {
       console.error('Failed to create call:', error);
       return null;
     }
-  }, [client]);
+  };
 
-  const joinCall = useCallback(async (callId: string) => {
+  const joinCall = async (callId: string) => {
     if (!client) return null;
 
-    const existingCall = client.call('default', callId);
-    
     try {
-      await existingCall.join();
-      setCall(existingCall);
-      return existingCall;
+      const newCall = client.call('default', callId);
+      await newCall.join({
+        create: false,
+        data: {
+          members: [{ user_id: userId, role: 'user' }],
+        },
+      });
+      setCall(newCall);
+      return newCall;
     } catch (error) {
       console.error('Failed to join call:', error);
       return null;
     }
-  }, [client]);
+  };
 
-  const startScreenShare = useCallback(async () => {
+  const startScreenShare = async () => {
     if (!call) return false;
 
     try {
       await call.screenShare.enable();
-      setIsScreenSharing(true);
       return true;
     } catch (error) {
       console.error('Failed to start screen share:', error);
       return false;
     }
-  }, [call]);
+  };
 
-  const stopScreenShare = useCallback(async () => {
+  const stopScreenShare = async () => {
     if (!call) return false;
 
     try {
       await call.screenShare.disable();
-      setIsScreenSharing(false);
       return true;
     } catch (error) {
       console.error('Failed to stop screen share:', error);
       return false;
     }
-  }, [call]);
-
-  const leaveCall = useCallback(async () => {
-    if (!call) return;
-
-    try {
-      await call.leave();
-      setCall(null);
-      setIsScreenSharing(false);
-    } catch (error) {
-      console.error('Failed to leave call:', error);
-    }
-  }, [call]);
+  };
 
   return {
     client,
     call,
-    isScreenSharing,
-    isConnected,
     createCall,
     joinCall,
     startScreenShare,
     stopScreenShare,
-    leaveCall
+    isScreenSharing: call?.screenShare.state.status === 'enabled',
   };
-};
+}
